@@ -81,6 +81,7 @@ const EDGE_T = .16;                      // ASCII: above this contour strength, 
 const STITCH_PX = 6;                     // Stitch style: one stitch per 6px square
 const STEM_MS_PER_PT = 7, STEM_MAX_MS = 900, BLOOM_MS = 1100, LEAF_MS = 600;
 const STAGES = 8;
+const BREATH = { period: 4000, swell: .04, glow: .25, tick: .09 };   // ms per breath · size change · brightness dip · glyph-density shift
 const PINCH_ON = 0.30, PINCH_OFF = 0.45, FIST_HOLD_MS = 700;
 const TAP_RADIUS = 45;                  // px: pinches that wander less than this grow one flower
 const TYPE_RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
@@ -560,8 +561,8 @@ function lineSprite(kind, wC, hC, o, col, colour, rot, tilt, spin) {
   for (const [c, r, ch, , fill] of cells.values()) { sc.fillStyle = fill; sc.fillText(ch, c * charW, (r + .5) * lineH); mc.fillRect(c * charW, r * lineH, charW, lineH); }
   return { sp, mk, wC, hC };
 }
-function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type") {
-  return cached([mode, kind, R, o, col && col.p[0], colour, rot, tilt, spin].join("|"), () => {
+function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type", nudge = 0) {
+  return cached([mode, kind, R, o, col && col.p[0], colour, rot, tilt, spin, nudge].join("|"), () => {
     const wC = 2 * R + 1, hC = R + 1;
     if (mode === "ascii" && LINE_KINDS.has(kind)) return lineSprite(kind, wC, hC, o, col, colour, rot, tilt, spin);
     sctx.clearRect(0, 0, SRC, SRC); paintTo(sctx, SRC, kind, o, col, rot, tilt, spin);
@@ -587,7 +588,7 @@ function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type") {
       const i = r * wC + c; if (A(i) < .3) continue;
       if (mode === "ascii") {
         const gx = (F(c + 1, r) - F(c - 1, r)) / 2, gy = (F(c, r + 1) - F(c, r - 1)) / 4;   // rows are 2× tall
-        const ch = Math.hypot(gx, gy) > (PHOTOS[kind] ? PHOTO_EDGE_T : EDGE_T) ? dirChar(Math.atan2(gx, -gy)) : RAMP[Math.max(1, Math.round((.12 + .88 * Math.pow(norm(i), .8)) * 9))];
+        const ch = Math.hypot(gx, gy) > (PHOTOS[kind] ? PHOTO_EDGE_T : EDGE_T) ? dirChar(Math.atan2(gx, -gy)) : RAMP[Math.max(1, Math.min(9, Math.round((.12 + nudge + .88 * Math.pow(norm(i), .8)) * 9)))];
         if (!colour) sc.fillStyle = lift([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
         sc.fillText(ch, c * charW, (r + .5) * lineH); mc.fillRect(c * charW, r * lineH, charW, lineH);
         continue;
@@ -601,11 +602,11 @@ function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type") {
     return { sp, mk, wC, hC };
   });
 }
-function blitType(s, x, y) {
+function blitType(s, x, y, k = 1, alpha = 1) {
   const c0 = Math.round(x / charW - s.wC / 2), r0 = Math.round(y / lineH - s.hC / 2);
-  const px = c0 * charW, py = r0 * lineH, w = s.wC * charW, h = s.hC * lineH;
-  lctx.globalCompositeOperation = "destination-out"; lctx.drawImage(s.mk, px, py, w, h);
-  lctx.globalCompositeOperation = "source-over"; lctx.drawImage(s.sp, px, py, w, h);
+  const w = s.wC * charW, h = s.hC * lineH, px = c0 * charW + w * (1 - k) / 2, py = r0 * lineH + h * (1 - k) / 2;
+  lctx.globalCompositeOperation = "destination-out"; lctx.drawImage(s.mk, px, py, w * k, h * k);
+  lctx.globalCompositeOperation = "source-over"; lctx.globalAlpha = alpha; lctx.drawImage(s.sp, px, py, w * k, h * k); lctx.globalAlpha = 1;
 }
 
 // ── stroke → vine (geometry in px, shared by all styles; sizes per style)
@@ -620,7 +621,7 @@ function makeVine(pts, pal) {
     const natural = pal === "garden" && NATURAL[kind];
     if (style === "stitch") rad = MOTIFS[kind][0].length * STITCH_PX / 2;
     return { x, y, rad, start, kind, col: natural ? pickOf(natural) : colour(), rot: UPRIGHT.has(kind) ? pickOf([-.3927, 0, 0, .3927]) : Math.floor(rnd(0, 8)) * .785, tilt: pickOf([1, .88]),
-      spin: Math.floor(rnd(0, 4)) * .4, callout: Math.random() < .4, calloutAng: rnd(0, 6.28),
+      spin: Math.floor(rnd(0, 4)) * .4, breath: rnd(.85, 1.2) * BREATH.period, phase: rnd(0, 6.283), callout: Math.random() < .4, calloutAng: rnd(0, 6.28),
       sprinkle: Array.from({ length: 46 }, (_, k) => k < 32
         ? (() => { const a = rnd(0, 6.28), r = Math.sqrt(Math.random()) * 1.15; return [Math.cos(a) * r, Math.sin(a) * r]; })()
         : [rnd(-.5, .5), rnd(.4, 1.7)]) };
@@ -715,7 +716,11 @@ function drawType(v, t, mode = "type") {
     const st = Math.min(STAGES - 1, Math.floor(easeOut(clamp01((t - f.start) / BLOOM_MS)) * STAGES)), o = (st + 1) / STAGES;
     const kind = f.kind === "bud" ? "tulip" : f.kind;
     const R = Math.max(3, Math.round(f.rad / charW * (.45 + .55 * o)));
-    blitType(typeSprite(kind, R, o, f.col, v.mono || (asc ? null : lift(hex(f.col.p[0]), .6)), f.rot, f.tilt, f.spin, mode), f.x, f.y);
+    // breathing, once fully open: slow swell + glow, and the characters tick a notch denser on the inhale, lighter on the exhale
+    const since = t - f.start - BLOOM_MS, b = since > 0 ? Math.sin(since / f.breath * 6.283 + f.phase) * Math.min(1, since / 800) : 0;
+    const nudge = since > 0 ? (b > .55 ? BREATH.tick : b < -.55 ? -BREATH.tick : 0) : 0;
+    blitType(typeSprite(kind, R, o, f.col, v.mono || (asc ? null : lift(hex(f.col.p[0]), .6)), f.rot, f.tilt, f.spin, mode, nudge),
+      f.x, f.y, 1 + BREATH.swell * b, 1 - BREATH.glow * (1 - b) / 2);
   }
 }
 function drawOverlay(v, t, now) {
