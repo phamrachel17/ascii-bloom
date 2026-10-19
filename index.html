@@ -13,20 +13,19 @@
   html, body { height: 100%; background: var(--bg); overflow: hidden; }
   body { font-family: "IBM Plex Mono", monospace; color: var(--ink); -webkit-font-smoothing: antialiased; }
   canvas { position: fixed; inset: 0; display: block; cursor: crosshair; }
-  .ui, .dock { transition: opacity .6s ease; }
-  body.hide-ui .ui, body.idle .dock { opacity: 0; pointer-events: none; }
+  .ui { transition: opacity .6s ease; }
+  body.hide-ui .ui { opacity: 0; pointer-events: none; }
   .label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
 
   /* title, top left — stays on screen when H hides the controls */
   #title { position: fixed; top: 22px; left: 24px; pointer-events: none; }
   #title h1 { font-size: 15px; font-weight: 500; letter-spacing: .32em; }
-  #title p { margin-top: 6px; color: var(--dim); }
 
   /* one-line hint, bottom centre; fades once the first flower blooms */
   #hint { position: fixed; left: 50%; top: 26px; transform: translateX(-50%); color: var(--dim); white-space: nowrap; pointer-events: none; }
   #hint.gone { opacity: 0; }
 
-  /* control dock, bottom right; fades when the mouse is idle */
+  /* control dock, bottom right */
   .dock { position: fixed; right: 20px; bottom: 20px; display: flex; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: rgba(20,4,5,.45); }
   .dock button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--dim); background: none; border: 0; border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: color .2s, background .2s; }
   .dock button:hover { color: var(--ink); }
@@ -38,7 +37,7 @@
   #credits[hidden] { display: none; }
 
   /* debug readout (D) */
-  #debug { position: fixed; top: 82px; left: 24px; color: var(--dim); line-height: 1.8; pointer-events: none; }
+  #debug { position: fixed; top: 56px; left: 24px; color: var(--dim); line-height: 1.8; pointer-events: none; }
 
   /* style + colour pickers, bottom left — same pill as the dock, fade with it */
   .pickers { position: fixed; left: 20px; bottom: 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
@@ -50,7 +49,7 @@
 
   @media (max-width: 640px) {
     #hint { top: auto; bottom: 168px; width: calc(100% - 32px); white-space: normal; text-align: center; font-size: 10px; line-height: 1.6; }
-    #debug { top: 74px; left: 16px; font-size: 10px; }
+    #debug { top: 48px; left: 16px; font-size: 10px; }
     .pickers { left: 16px; right: 16px; bottom: 66px; } .pickers .dock { max-width: 100%; overflow-x: auto; scrollbar-width: none; } .pickers .dock button { padding: 7px 9px; white-space: nowrap; }
     .dock { left: 16px; right: 16px; justify-content: space-between; } .dock button { padding: 7px 8px; } #full { display: none; }
     #credits { left: 16px; right: 16px; max-width: none; }
@@ -60,7 +59,7 @@
 </head>
 <body>
 <canvas id="out"></canvas>
-<div id="title"><h1>BLOOM</h1><p class="label">draw flowers in the air</p></div>
+<div id="title"><h1>BLOOM</h1></div>
 <div id="hint" class="ui label">Pinch &amp; drag to draw · pinch to bloom · fist to clear</div>
 <div class="dock ui label">
   <button id="sound">Sound</button><button id="clear">Clear</button><button id="save">Save</button><button id="full">Fullscreen</button><button id="info">Credits</button>
@@ -72,7 +71,7 @@
   Rose: Jamie Street (CC0)<br>Pansy: globalquiz.org (CC BY 3.0)<br>Spider lily: Yūshi Ishizaki, Naturalis (public domain)
 </div>
 <div class="pickers ui label"><div class="dock" id="styles"><span class="name">Style</span></div><div class="dock" id="colours"><span class="name">Colour</span></div></div>
-<div id="debug" class="label"><span id="status">Starting camera</span><br><span id="hand">Hand —</span><br><span id="perf"></span></div>
+<div id="debug" class="label"><span id="status">Starting camera</span><br><span id="hand">Hands —</span><br><span id="perf"></span></div>
 
 <script type="module">
 // ── tunables
@@ -229,7 +228,6 @@ const video = document.createElement("video"); video.playsInline = true; video.m
 let W, H, dpr, charW, lineH, haveCam = false, landmarker = null;
 let palette = "garden", style = "photo";
 let vines = [];
-let stroke = null;
 
 // ── controls
 // style + colour pickers
@@ -250,7 +248,7 @@ $("sound").onclick = e => {
   try {
     if (!actx) initAudio();
     actx.resume().catch(err => { btn.textContent = "Sound error: " + err.message; console.error(err); });
-    strum(CHORDS[2].notes, .4, .06);                                                         // soft Cmaj9 to confirm, right in the click
+    strum(CHORDS[2].notes, .4);                                                         // soft Cmaj9 to confirm, right in the click
   } catch (err) { btn.textContent = "Sound error: " + err.message; console.error(err); soundOn = false; }
 };
 $("clear").onclick = () => vines = [];
@@ -258,10 +256,7 @@ $("full").onclick = toggleFull;
 $("info").onclick = e => { const c = $("credits"); c.hidden = !c.hidden; e.currentTarget.classList.toggle("on", !c.hidden); };
 function toggleFull() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); }
 document.addEventListener("fullscreenchange", () => $("full").classList.toggle("on", !!document.fullscreenElement));
-// dock fades after a moment without mouse movement, so it stays out of recordings
-let idleTimer = 0;
-const wake = () => { document.body.classList.remove("idle"); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add("idle"), 2500); };
-addEventListener("pointermove", wake); wake();
+
 $("save").onclick = () => out.toBlob(b => { const a = document.createElement("a");
   a.href = URL.createObjectURL(b); a.download = `bloom-${style}-${Date.now()}.png`; a.click(); });
 addEventListener("keydown", e => {
@@ -757,8 +752,9 @@ function drawOverlay(v, t, now) {
   lctx.textAlign = "start";
 }
 
-// ── hand tracking
-let hand = null, smooth = null, pinching = false, fistSince = 0, lostSince = 0;
+// ── hand tracking: up to two hands, each with its own pinch, stroke and fist timer
+const hands = new Map();                                        // "Left" / "Right" → { x, y, smooth, pinching, stroke, fist, fistSince, seenAt }
+const mouse = { stroke: null, pinching: false };
 const D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function toScreen(lm) {
   const vw = video.videoWidth, vh = video.videoHeight, s = Math.max(W / vw, H / vh);
@@ -767,26 +763,37 @@ function toScreen(lm) {
 }
 function handleHand(now) {
   if (!landmarker || video.readyState < 2) return;
-  const lm = landmarker.detectForVideo(video, now).landmarks?.[0];
-  if (!lm) { hand = null; $("hand").textContent = "Hand —"; if (!lostSince) lostSince = now;
-    if (pinching && now - lostSince > 200) endStroke(); return; }
-  lostSince = 0;
-  const palm = D(lm[0], lm[9]) || 1e-3, pinchR = D(lm[4], lm[8]) / palm, idxExt = D(lm[8], lm[0]) / palm;
-  const fist = [8, 12, 16, 20].every(i => D(lm[i], lm[0]) / palm < 1.0);
-  const raw = toScreen({ x: (lm[4].x + lm[8].x) / 2, y: (lm[4].y + lm[8].y) / 2 });
-  smooth = smooth ? { x: smooth.x + (raw.x - smooth.x) * .4, y: smooth.y + (raw.y - smooth.y) * .4 } : raw;
-  hand = { ...smooth, fist };
-  if (!pinching && pinchR < PINCH_ON && idxExt > 1.15) { pinching = true; stroke = [{ ...smooth }]; }
-  else if (pinching && pinchR > PINCH_OFF) endStroke();
-  else if (pinching) addPoint(smooth);
-  if (fist && !pinching) { fistSince ||= now; if (now - fistSince > FIST_HOLD_MS) { vines = []; fistSince = 0; } } else fistSince = 0;
-  $("hand").textContent = pinching ? "Hand · drawing" : fist ? "Hand · fist" : "Hand · ready";
+  const res = landmarker.detectForVideo(video, now), seen = new Set();
+  (res.landmarks || []).forEach((lm, i) => {
+    // key by handedness so each hand keeps its own stroke; if both get the same label, give the second the other one
+    let key = (res.handedness || res.handednesses)?.[i]?.[0]?.categoryName || "h" + i;
+    if (seen.has(key)) key = key === "Left" ? "Right" : "Left";
+    seen.add(key);
+    const h = hands.get(key) || { smooth: null, pinching: false, stroke: null, fistSince: 0 };
+    hands.set(key, h); h.seenAt = now;
+    const palm = D(lm[0], lm[9]) || 1e-3, pinchR = D(lm[4], lm[8]) / palm, idxExt = D(lm[8], lm[0]) / palm;
+    h.fist = [8, 12, 16, 20].every(j => D(lm[j], lm[0]) / palm < 1.0);
+    const raw = toScreen({ x: (lm[4].x + lm[8].x) / 2, y: (lm[4].y + lm[8].y) / 2 });
+    h.smooth = h.smooth ? { x: h.smooth.x + (raw.x - h.smooth.x) * .4, y: h.smooth.y + (raw.y - h.smooth.y) * .4 } : raw;
+    h.x = h.smooth.x; h.y = h.smooth.y;
+    if (!h.pinching && pinchR < PINCH_ON && idxExt > 1.15) { h.pinching = true; h.stroke = [{ ...h.smooth }]; }
+    else if (h.pinching && pinchR > PINCH_OFF) endStroke(h);
+    else if (h.pinching) addPoint(h.stroke, h.smooth);
+    if (h.fist && !h.pinching) { h.fistSince ||= now; if (now - h.fistSince > FIST_HOLD_MS) { vines = []; h.fistSince = 0; } } else h.fistSince = 0;
+  });
+  for (const [key, h] of hands) if (!seen.has(key)) {           // hand left the frame: finish its stroke, then forget it
+    if (h.pinching && now - h.seenAt > 200) endStroke(h);
+    if (!h.pinching && now - h.seenAt > 600) hands.delete(key);
+  }
+  const st = [...hands].filter(([, h]) => now - h.seenAt < 150).map(([k, h]) => `${k[0]} ${h.pinching ? "drawing" : h.fist ? "fist" : "ready"}`);
+  $("hand").textContent = st.length ? "Hands · " + st.join(" · ") : "Hands —";
 }
-function addPoint(p) { const l = stroke[stroke.length - 1]; if (Math.hypot(p.x - l.x, p.y - l.y) > 2) stroke.push({ x: p.x, y: p.y }); }
-function endStroke() { pinching = false; if (stroke && stroke.length) { vines.push(makeVine(stroke, palette)); $("hint").classList.add("gone"); } stroke = null; }
-out.addEventListener("pointerdown", e => { stroke = [{ x: e.clientX, y: e.clientY }]; out.setPointerCapture(e.pointerId); });
-out.addEventListener("pointermove", e => { if (stroke && !pinching) addPoint({ x: e.clientX, y: e.clientY }); });
-out.addEventListener("pointerup", () => { if (!pinching) endStroke(); });
+function addPoint(stroke, p) { const l = stroke[stroke.length - 1]; if (Math.hypot(p.x - l.x, p.y - l.y) > 2) stroke.push({ x: p.x, y: p.y }); }
+function endStroke(h) { h.pinching = false; if (h.stroke && h.stroke.length) { vines.push(makeVine(h.stroke, palette)); $("hint").classList.add("gone"); } h.stroke = null; }
+const liveStrokes = () => [...[...hands.values()].map(h => h.stroke), mouse.stroke].filter(Boolean);
+out.addEventListener("pointerdown", e => { mouse.stroke = [{ x: e.clientX, y: e.clientY }]; out.setPointerCapture(e.pointerId); });
+out.addEventListener("pointermove", e => { if (mouse.stroke) addPoint(mouse.stroke, { x: e.clientX, y: e.clientY }); });
+out.addEventListener("pointerup", () => { if (mouse.stroke) endStroke(mouse); });
 
 // ── frame
 let last = performance.now(), fpsAcc = 0, fpsN = 0;
@@ -807,7 +814,7 @@ function background() {
 }
 
 // ── calm jazz: a Rhodes-style electric piano, synthesised (no audio files). Off by default; browsers only allow audio after a click.
-const SOUND = { volume: .8, decay: 3.2, tone: 2200 };            // tone: low-pass cutoff in Hz (lower = mellower)
+const SOUND = { volume: .8, decay: 1.3, tone: 2200 };            // tone: low-pass cutoff in Hz (lower = mellower)
 // ii–V–I–vi in C, mid-register voicings (MIDI notes); each new line or tap moves to the next chord
 const CHORDS = [
   { name: "Dm9",   notes: [50, 53, 57, 60, 64] },
@@ -821,22 +828,20 @@ function initAudio() {
   actx = new AudioContext(); master = actx.createGain(); master.gain.value = SOUND.volume;
   master.connect(actx.destination);
 }
-// one electric-piano note: FM (modulator at 1× gives the bell-ish bark that mellows out), a faint tine, slow tremolo, low-pass
+// one electric-piano note: FM (modulator at 1× gives the bell-ish bark that mellows out), a faint tine, low-pass; dry, short tail
 function rhodes(midi, vel = .6, when = 0) {
   const t = actx.currentTime + .02 + when, f = 440 * 2 ** ((midi - 69) / 12), dur = SOUND.decay;
   const car = actx.createOscillator(), mod = actx.createOscillator(), modG = actx.createGain();
   const tine = actx.createOscillator(), tineG = actx.createGain(), amp = actx.createGain(), lp = actx.createBiquadFilter();
-  const lfo = actx.createOscillator(), lfoG = actx.createGain();
   car.frequency.value = f; mod.frequency.value = f; tine.frequency.value = f * 4.01;
   modG.gain.setValueAtTime(f * 1.4 * vel, t); modG.gain.exponentialRampToValueAtTime(f * .08, t + .5);   // brightness fades fast
   tineG.gain.setValueAtTime(.05 * vel, t); tineG.gain.exponentialRampToValueAtTime(.0001, t + .25);
   amp.gain.setValueAtTime(0, t); amp.gain.linearRampToValueAtTime(.6 * vel, t + .012); amp.gain.exponentialRampToValueAtTime(.0001, t + dur);
-  lfo.frequency.value = 4.2; lfoG.gain.value = .08 * vel; lfo.connect(lfoG); lfoG.connect(amp.gain);         // gentle tremolo
   lp.type = "lowpass"; lp.frequency.value = SOUND.tone; lp.Q.value = .4;
   mod.connect(modG); modG.connect(car.frequency); car.connect(amp); tine.connect(tineG); tineG.connect(amp); amp.connect(lp); lp.connect(master);
-  for (const o of [car, mod, tine, lfo]) { o.start(t); o.stop(t + dur + .05); }
+  for (const o of [car, mod, tine]) { o.start(t); o.stop(t + dur + .05); }
 }
-const strum = (notes, vel, gap = .045) => notes.forEach((m, i) => rhodes(m, vel * (i ? .8 : 1), i * gap));
+const strum = (notes, vel, gap = .025) => notes.forEach((m, i) => rhodes(m, vel * (i ? .8 : 1), i * gap));
 // a line plays single notes of its chord (left low → right high); a pinch-tap strums the whole chord
 function bloomSound(f, big, v) {
   const now = performance.now(); recent = recent.filter(x => now - x < 150); if (recent.length > 3) return; recent.push(now);   // no pile-ups
@@ -862,14 +867,14 @@ function tick(now) {
   } else for (const v of vines) style === "overlay" ? drawOverlay(v, now - v.t0, now) : drawType(v, now - v.t0, style === "photo" ? "ascii" : style);
 
   lctx.font = `500 ${FONT_PX}px "IBM Plex Mono"`; lctx.fillStyle = "#F3E9D8";
-  if (stroke) { for (const p of stroke) lctx.fillText(":", Math.floor(p.x / charW) * charW, (Math.floor(p.y / lineH) + .5) * lineH);
+  for (const stroke of liveStrokes()) { for (const p of stroke) lctx.fillText(":", Math.floor(p.x / charW) * charW, (Math.floor(p.y / lineH) + .5) * lineH);
     const p = stroke[stroke.length - 1]; lctx.fillText("▌", (Math.floor(p.x / charW) + 1) * charW, (Math.floor(p.y / lineH) + .5) * lineH); }
   ctx.drawImage(layer, 0, 0, W, H);
 
-  if (hand) {
-    ctx.beginPath(); ctx.arc(hand.x, hand.y, 9, 0, 6.3); ctx.strokeStyle = ctx.fillStyle = "#F3E9D8"; ctx.lineWidth = 1.2;
-    pinching ? ctx.fill() : ctx.stroke();
-    if (fistSince) { ctx.beginPath(); ctx.arc(hand.x, hand.y, 16, -1.57, -1.57 + 6.28 * clamp01((now - fistSince) / FIST_HOLD_MS)); ctx.stroke(); }
+  for (const h of hands.values()) if (now - h.seenAt < 150) {     // one ring per visible hand: filled while drawing
+    ctx.beginPath(); ctx.arc(h.x, h.y, 9, 0, 6.3); ctx.strokeStyle = ctx.fillStyle = "#F3E9D8"; ctx.lineWidth = 1.2;
+    h.pinching ? ctx.fill() : ctx.stroke();
+    if (h.fistSince) { ctx.beginPath(); ctx.arc(h.x, h.y, 16, -1.57, -1.57 + 6.28 * clamp01((now - h.fistSince) / FIST_HOLD_MS)); ctx.stroke(); }
   }
   fpsAcc += now - last; fpsN++; last = now;
   if (fpsN === 30) { $("perf").textContent = `${Math.round(1000 / (fpsAcc / fpsN))} FPS · ${STYLES[style].label}`; fpsAcc = fpsN = 0; }
@@ -910,7 +915,7 @@ async function init() {
     const { FilesetResolver, HandLandmarker } = await import(`${MP}/vision_bundle.mjs`);
     const fs = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
     landmarker = await HandLandmarker.createFromOptions(fs, {
-      baseOptions: { modelAssetPath: HAND_MODEL, delegate: "GPU" }, runningMode: "VIDEO", numHands: 1 });
+      baseOptions: { modelAssetPath: HAND_MODEL, delegate: "GPU" }, runningMode: "VIDEO", numHands: 2 });
     $("status").textContent = "Live";
   } catch (e) { console.warn(e); $("status").textContent = "Hand tracking failed · drag with mouse"; $("hint").textContent = "Hand tracking unavailable · drag with the mouse to draw"; }
 }
