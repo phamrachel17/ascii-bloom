@@ -25,14 +25,19 @@
   #hint { position: fixed; left: 50%; top: 26px; transform: translateX(-50%); color: var(--dim); white-space: nowrap; pointer-events: none; }
   #hint.gone { opacity: 0; }
 
-  /* control dock, bottom right */
-  .dock { position: fixed; right: 20px; bottom: 20px; display: flex; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: rgba(20,4,5,.45); }
-  .dock button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--dim); background: none; border: 0; border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: color .2s, background .2s; }
+  /* bottom bar: pickers on the left, actions on the right; when there isn't room the actions wrap onto their own row */
+  .bottombar { position: fixed; left: 20px; right: 20px; bottom: 20px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; pointer-events: none; }
+  .bottombar > * { pointer-events: auto; }
+  #actions { margin-left: auto; }
+  /* pill: shrinks to the screen and scrolls sideways rather than overflowing */
+  .dock { display: flex; align-items: center; gap: 2px; padding: 4px; max-width: 100%; overflow-x: auto; scrollbar-width: none; border: 1px solid var(--line); border-radius: 999px; background: rgba(20,4,5,.45); }
+  .dock::-webkit-scrollbar { display: none; }
+  .dock button { flex: none; white-space: nowrap; font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--dim); background: none; border: 0; border-radius: 999px; padding: 7px 13px; cursor: pointer; transition: color .2s, background .2s; }
   .dock button:hover { color: var(--ink); }
   .dock button.on { color: var(--bg); background: var(--ink); }
 
   /* credits panel */
-  #credits { position: fixed; right: 20px; bottom: 72px; max-width: 360px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(20,4,5,.85); font-size: 11px; line-height: 1.7; color: var(--dim); }
+  #credits { position: fixed; right: 20px; top: 20px; max-width: 360px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(20,4,5,.85); font-size: 11px; line-height: 1.7; color: var(--dim); }
   #credits b { color: var(--ink); font-weight: 500; letter-spacing: .14em; text-transform: uppercase; display: block; margin-bottom: 6px; }
   #credits[hidden] { display: none; }
 
@@ -40,18 +45,18 @@
   #debug { position: fixed; top: 56px; left: 24px; color: var(--dim); line-height: 1.8; pointer-events: none; }
 
   /* style + colour pickers, bottom left — same pill as the dock, fade with it */
-  .pickers { position: fixed; left: 20px; bottom: 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-  .pickers .dock { position: static; align-items: center; }
-  .pickers .name { color: var(--dim); opacity: .7; padding: 0 8px 0 10px; }
+  .pickers { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 100%; }
+  .pickers .name { flex: none; color: var(--dim); opacity: .7; padding: 0 8px 0 10px; }
   .dock .sw { display: inline-flex; gap: 2px; margin-right: 7px; vertical-align: -1px; }
   .dock .sw i { width: 5px; height: 10px; display: inline-block; border-radius: 1px; }
   #debug[hidden] { display: none; }
 
+  @media (max-width: 900px) { #hint { left: 24px; top: 112px; transform: none; } }
   @media (max-width: 640px) {
-    #hint { top: auto; bottom: 168px; width: calc(100% - 32px); white-space: normal; text-align: center; font-size: 10px; line-height: 1.6; }
+    #hint { left: 16px; top: 112px; transform: none; width: calc(100% - 32px); white-space: normal; font-size: 10px; line-height: 1.6; }
     #debug { top: 48px; left: 16px; font-size: 10px; }
-    .pickers { left: 16px; right: 16px; bottom: 66px; } .pickers .dock { max-width: 100%; overflow-x: auto; scrollbar-width: none; } .pickers .dock button { padding: 7px 9px; white-space: nowrap; }
-    .dock { left: 16px; right: 16px; justify-content: space-between; } .dock button { padding: 7px 8px; } #full { display: none; }
+    .bottombar { left: 16px; right: 16px; bottom: 16px; } .pickers { width: 100%; }
+    #actions { width: 100%; justify-content: space-between; } .dock button { padding: 7px 9px; } #full { display: none; }
     #credits { left: 16px; right: 16px; max-width: none; }
     #title { top: 18px; left: 16px; }
   }
@@ -61,16 +66,18 @@
 <canvas id="out"></canvas>
 <div id="title"><h1>BLOOM</h1></div>
 <div id="hint" class="ui label">Pinch &amp; drag to draw · pinch to bloom · fist to clear</div>
-<div class="dock ui label">
-  <button id="pause">Pause</button><button id="sound">Sound</button><button id="clear">Clear</button><button id="save">Save</button><button id="full">Fullscreen</button><button id="info">Credits</button>
-</div>
 <div id="credits" class="ui" hidden>
   <b>Flower photos</b>
   Via Wikimedia Commons, converted to ASCII.<br>
   Lily: Sherwin Carlquist (CC BY 4.0)<br>Orchid: Mustang Joe (CC0)<br>Plum blossom: 酎犬 八号 (CC BY 2.0)<br>
   Rose: Jamie Street (CC0)<br>Pansy: globalquiz.org (CC BY 3.0)<br>Spider lily: Yūshi Ishizaki, Naturalis (public domain)
 </div>
-<div class="pickers ui label"><div class="dock" id="styles"><span class="name">Style</span></div><div class="dock" id="colours"><span class="name">Colour</span></div></div>
+<div class="bottombar ui label">
+  <div class="pickers"><div class="dock" id="styles"><span class="name">Style</span></div><div class="dock" id="colours"><span class="name">Colour</span></div></div>
+  <div class="dock" id="actions">
+    <button id="pause">Pause</button><button id="sound">Sound</button><button id="clear">Clear</button><button id="save">Save</button><button id="full">Fullscreen</button><button id="info">Credits</button>
+  </div>
+</div>
 <div id="debug" class="label"><span id="status">Starting camera</span><br><span id="hand">Hands —</span><br><span id="perf"></span></div>
 
 <script type="module">
