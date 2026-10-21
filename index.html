@@ -62,7 +62,7 @@
 <div id="title"><h1>BLOOM</h1></div>
 <div id="hint" class="ui label">Pinch &amp; drag to draw · pinch to bloom · fist to clear</div>
 <div class="dock ui label">
-  <button id="sound">Sound</button><button id="clear">Clear</button><button id="save">Save</button><button id="full">Fullscreen</button><button id="info">Credits</button>
+  <button id="pause">Pause</button><button id="sound">Sound</button><button id="clear">Clear</button><button id="save">Save</button><button id="full">Fullscreen</button><button id="info">Credits</button>
 </div>
 <div id="credits" class="ui" hidden>
   <b>Flower photos</b>
@@ -81,7 +81,6 @@ const EDGE_T = .16;                      // ASCII: above this contour strength, 
 const STITCH_PX = 6;                     // Stitch style: one stitch per 6px square
 const STEM_MS_PER_PT = 7, STEM_MAX_MS = 900, BLOOM_MS = 1100, LEAF_MS = 600;
 const STAGES = 8;
-const BREATH = { period: 4000, swell: .04, glow: .25, tick: .09 };   // ms per breath · size change · brightness dip · glyph-density shift
 const PINCH_ON = 0.30, PINCH_OFF = 0.45, FIST_HOLD_MS = 700;
 const TAP_RADIUS = 45;                  // px: pinches that wander less than this grow one flower
 const TYPE_RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
@@ -253,6 +252,13 @@ $("sound").onclick = e => {
   } catch (err) { btn.textContent = "Sound error: " + err.message; console.error(err); soundOn = false; }
 };
 $("clear").onclick = () => vines = [];
+// pause: hands and mouse stop adding flowers; what's on screen stays
+let paused = false;
+function togglePause() {
+  paused = !paused; $("pause").classList.toggle("on", paused); $("pause").textContent = paused ? "Paused" : "Pause";
+  if (paused) { for (const h of hands.values()) { h.pinching = false; h.stroke = null; } mouse.stroke = null; }   // drop half-drawn lines
+}
+$("pause").onclick = togglePause;
 $("full").onclick = toggleFull;
 $("info").onclick = e => { const c = $("credits"); c.hidden = !c.hidden; e.currentTarget.classList.toggle("on", !c.hidden); };
 function toggleFull() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); }
@@ -265,6 +271,7 @@ addEventListener("keydown", e => {
   if (k === "c") vines = [];
   if (k === "h") document.body.classList.toggle("hide-ui");          // hide everything for recording
   if (k === "f") toggleFull();
+  if (k === "p") togglePause();
   if (k === "d") $("debug").hidden = !$("debug").hidden;
 });
 // same strokes, re-grown in the new style, shown fully bloomed
@@ -561,8 +568,8 @@ function lineSprite(kind, wC, hC, o, col, colour, rot, tilt, spin) {
   for (const [c, r, ch, , fill] of cells.values()) { sc.fillStyle = fill; sc.fillText(ch, c * charW, (r + .5) * lineH); mc.fillRect(c * charW, r * lineH, charW, lineH); }
   return { sp, mk, wC, hC };
 }
-function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type", nudge = 0) {
-  return cached([mode, kind, R, o, col && col.p[0], colour, rot, tilt, spin, nudge].join("|"), () => {
+function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type") {
+  return cached([mode, kind, R, o, col && col.p[0], colour, rot, tilt, spin].join("|"), () => {
     const wC = 2 * R + 1, hC = R + 1;
     if (mode === "ascii" && LINE_KINDS.has(kind)) return lineSprite(kind, wC, hC, o, col, colour, rot, tilt, spin);
     sctx.clearRect(0, 0, SRC, SRC); paintTo(sctx, SRC, kind, o, col, rot, tilt, spin);
@@ -588,7 +595,7 @@ function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type", nud
       const i = r * wC + c; if (A(i) < .3) continue;
       if (mode === "ascii") {
         const gx = (F(c + 1, r) - F(c - 1, r)) / 2, gy = (F(c, r + 1) - F(c, r - 1)) / 4;   // rows are 2× tall
-        const ch = Math.hypot(gx, gy) > (PHOTOS[kind] ? PHOTO_EDGE_T : EDGE_T) ? dirChar(Math.atan2(gx, -gy)) : RAMP[Math.max(1, Math.min(9, Math.round((.12 + nudge + .88 * Math.pow(norm(i), .8)) * 9)))];
+        const ch = Math.hypot(gx, gy) > (PHOTOS[kind] ? PHOTO_EDGE_T : EDGE_T) ? dirChar(Math.atan2(gx, -gy)) : RAMP[Math.max(1, Math.round((.12 + .88 * Math.pow(norm(i), .8)) * 9))];
         if (!colour) sc.fillStyle = lift([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
         sc.fillText(ch, c * charW, (r + .5) * lineH); mc.fillRect(c * charW, r * lineH, charW, lineH);
         continue;
@@ -602,11 +609,11 @@ function typeSprite(kind, R, o, col, colour, rot, tilt, spin, mode = "type", nud
     return { sp, mk, wC, hC };
   });
 }
-function blitType(s, x, y, k = 1, alpha = 1) {
+function blitType(s, x, y, k = 1) {                              // k: scale about the centre (photo flowers grow this way)
   const c0 = Math.round(x / charW - s.wC / 2), r0 = Math.round(y / lineH - s.hC / 2);
   const w = s.wC * charW, h = s.hC * lineH, px = c0 * charW + w * (1 - k) / 2, py = r0 * lineH + h * (1 - k) / 2;
   lctx.globalCompositeOperation = "destination-out"; lctx.drawImage(s.mk, px, py, w * k, h * k);
-  lctx.globalCompositeOperation = "source-over"; lctx.globalAlpha = alpha; lctx.drawImage(s.sp, px, py, w * k, h * k); lctx.globalAlpha = 1;
+  lctx.globalCompositeOperation = "source-over"; lctx.drawImage(s.sp, px, py, w * k, h * k);
 }
 
 // ── stroke → vine (geometry in px, shared by all styles; sizes per style)
@@ -621,7 +628,7 @@ function makeVine(pts, pal) {
     const natural = pal === "garden" && NATURAL[kind];
     if (style === "stitch") rad = MOTIFS[kind][0].length * STITCH_PX / 2;
     return { x, y, rad, start, kind, col: natural ? pickOf(natural) : colour(), rot: UPRIGHT.has(kind) ? pickOf([-.3927, 0, 0, .3927]) : Math.floor(rnd(0, 8)) * .785, tilt: pickOf([1, .88]),
-      spin: Math.floor(rnd(0, 4)) * .4, breath: rnd(.85, 1.2) * BREATH.period, phase: rnd(0, 6.283), callout: Math.random() < .4, calloutAng: rnd(0, 6.28),
+      spin: Math.floor(rnd(0, 4)) * .4, callout: Math.random() < .4, calloutAng: rnd(0, 6.28),
       sprinkle: Array.from({ length: 46 }, (_, k) => k < 32
         ? (() => { const a = rnd(0, 6.28), r = Math.sqrt(Math.random()) * 1.15; return [Math.cos(a) * r, Math.sin(a) * r]; })()
         : [rnd(-.5, .5), rnd(.4, 1.7)]) };
@@ -713,14 +720,16 @@ function drawType(v, t, mode = "type") {
     blitType(typeSprite("leaf", R, 1, null, v.mono || (asc ? null : "#CFE3BE"), Math.round(l.ang / .3927) * .3927, 1, 0, mode), l.x, l.y);
   }
   for (const f of v.flowers) if (t >= f.start) {
-    const st = Math.min(STAGES - 1, Math.floor(easeOut(clamp01((t - f.start) / BLOOM_MS)) * STAGES)), o = (st + 1) / STAGES;
-    const kind = f.kind === "bud" ? "tulip" : f.kind;
+    const kind = f.kind === "bud" ? "tulip" : f.kind, colour = v.mono || (asc ? null : lift(hex(f.col.p[0]), .6));
+    const grow = easeOut(clamp01((t - f.start) / BLOOM_MS));
+    if (PHOTOS[kind]) {                                            // photos: render the open flower once, grow it by scaling (no per-stage re-render)
+      const R = Math.max(3, Math.round(f.rad / charW));
+      blitType(typeSprite(kind, R, 1, f.col, colour, f.rot, f.tilt, f.spin, mode), f.x, f.y, .45 + .55 * grow);
+      continue;
+    }
+    const st = Math.min(STAGES - 1, Math.floor(grow * STAGES)), o = (st + 1) / STAGES;
     const R = Math.max(3, Math.round(f.rad / charW * (.45 + .55 * o)));
-    // breathing, once fully open: slow swell + glow, and the characters tick a notch denser on the inhale, lighter on the exhale
-    const since = t - f.start - BLOOM_MS, b = since > 0 ? Math.sin(since / f.breath * 6.283 + f.phase) * Math.min(1, since / 800) : 0;
-    const nudge = since > 0 ? (b > .55 ? BREATH.tick : b < -.55 ? -BREATH.tick : 0) : 0;
-    blitType(typeSprite(kind, R, o, f.col, v.mono || (asc ? null : lift(hex(f.col.p[0]), .6)), f.rot, f.tilt, f.spin, mode, nudge),
-      f.x, f.y, 1 + BREATH.swell * b, 1 - BREATH.glow * (1 - b) / 2);
+    blitType(typeSprite(kind, R, o, f.col, colour, f.rot, f.tilt, f.spin, mode), f.x, f.y);
   }
 }
 function drawOverlay(v, t, now) {
@@ -766,37 +775,59 @@ function toScreen(lm) {
   const dw = vw * s, dh = vh * s, ox = (W - dw) / 2, oy = (H - dh) / 2;
   return { x: W - (ox + lm.x * dw), y: oy + lm.y * dh };
 }
+let nextHandId = 1, lastVideoTime = -1;
 function handleHand(now) {
   if (!landmarker || video.readyState < 2) return;
+  if (video.currentTime === lastVideoTime) return;              // webcam gives ~30 new frames/s: don't re-detect the same one
+  lastVideoTime = video.currentTime;
   const res = landmarker.detectForVideo(video, now), seen = new Set();
-  (res.landmarks || []).forEach((lm, i) => {
-    // key by handedness so each hand keeps its own stroke; if both get the same label, give the second the other one
-    let key = (res.handedness || res.handednesses)?.[i]?.[0]?.categoryName || "h" + i;
-    if (seen.has(key)) key = key === "Left" ? "Right" : "Left";
+  // each detection's pinch point on screen; drop near-duplicates (the tracker sometimes reports one hand twice)
+  const dets = [];
+  for (const lm of res.landmarks || []) {
+    const pos = toScreen({ x: (lm[4].x + lm[8].x) / 2, y: (lm[4].y + lm[8].y) / 2 });
+    if (!dets.some(d => Math.hypot(d.pos.x - pos.x, d.pos.y - pos.y) < 40)) dets.push({ lm, pos });
+  }
+  // identity by position, not by the tracker's left/right label (which flips): pair detections with the
+  // recently seen hands so the total distance moved is smallest; a hand can't jump across the screen in one frame
+  const recent = [...hands].filter(([, h]) => now - h.seenAt < 600);
+  const dist = (h, d) => Math.hypot(h.x - d.pos.x, h.y - d.pos.y);
+  let pairs = [];
+  if (recent.length === 2 && dets.length === 2) {
+    const [[ka, a], [kb, b]] = recent;
+    pairs = dist(a, dets[0]) + dist(b, dets[1]) <= dist(a, dets[1]) + dist(b, dets[0]) ? [[ka, dets[0]], [kb, dets[1]]] : [[ka, dets[1]], [kb, dets[0]]];
+  } else {
+    const free = [...recent];
+    for (const d of dets) {
+      let best = -1, bd = Math.max(W, H) * .35;                   // further than this = a different hand
+      free.forEach(([, h], i) => { const dd = dist(h, d); if (dd < bd) { bd = dd; best = i; } });
+      pairs.push([best >= 0 ? free.splice(best, 1)[0][0] : "h" + nextHandId++, d]);
+    }
+  }
+  for (const [key, { lm, pos: raw }] of pairs) {
     seen.add(key);
     const h = hands.get(key) || { smooth: null, pinching: false, stroke: null, fistSince: 0 };
     hands.set(key, h); h.seenAt = now;
     const palm = D(lm[0], lm[9]) || 1e-3, pinchR = D(lm[4], lm[8]) / palm, idxExt = D(lm[8], lm[0]) / palm;
     h.fist = [8, 12, 16, 20].every(j => D(lm[j], lm[0]) / palm < 1.0);
-    const raw = toScreen({ x: (lm[4].x + lm[8].x) / 2, y: (lm[4].y + lm[8].y) / 2 });
     h.smooth = h.smooth ? { x: h.smooth.x + (raw.x - h.smooth.x) * .4, y: h.smooth.y + (raw.y - h.smooth.y) * .4 } : raw;
     h.x = h.smooth.x; h.y = h.smooth.y;
-    if (!h.pinching && pinchR < PINCH_ON && idxExt > 1.15) { h.pinching = true; h.stroke = [{ ...h.smooth }]; }
+    if (!h.pinching && !paused && pinchR < PINCH_ON && idxExt > 1.15) { h.pinching = true; h.stroke = [{ ...h.smooth }]; }
     else if (h.pinching && pinchR > PINCH_OFF) endStroke(h);
     else if (h.pinching) addPoint(h.stroke, h.smooth);
     if (h.fist && !h.pinching) { h.fistSince ||= now; if (now - h.fistSince > FIST_HOLD_MS) { vines = []; h.fistSince = 0; } } else h.fistSince = 0;
-  });
+  }
   for (const [key, h] of hands) if (!seen.has(key)) {           // hand left the frame: finish its stroke, then forget it
     if (h.pinching && now - h.seenAt > 200) endStroke(h);
     if (!h.pinching && now - h.seenAt > 600) hands.delete(key);
   }
-  const st = [...hands].filter(([, h]) => now - h.seenAt < 150).map(([k, h]) => `${k[0]} ${h.pinching ? "drawing" : h.fist ? "fist" : "ready"}`);
-  $("hand").textContent = st.length ? "Hands · " + st.join(" · ") : "Hands —";
+  const st = [...hands.values()].filter(h => now - h.seenAt < 150).sort((a, b) => a.x - b.x)
+    .map(h => `${h.x < W / 2 ? "L" : "R"} ${h.pinching ? "drawing" : h.fist ? "fist" : "ready"}`);
+  $("hand").textContent = (paused ? "Paused · " : "") + (st.length ? "Hands · " + st.join(" · ") : "Hands —");
 }
 function addPoint(stroke, p) { const l = stroke[stroke.length - 1]; if (Math.hypot(p.x - l.x, p.y - l.y) > 2) stroke.push({ x: p.x, y: p.y }); }
 function endStroke(h) { h.pinching = false; if (h.stroke && h.stroke.length) { vines.push(makeVine(h.stroke, palette)); $("hint").classList.add("gone"); } h.stroke = null; }
 const liveStrokes = () => [...[...hands.values()].map(h => h.stroke), mouse.stroke].filter(Boolean);
-out.addEventListener("pointerdown", e => { mouse.stroke = [{ x: e.clientX, y: e.clientY }]; out.setPointerCapture(e.pointerId); });
+out.addEventListener("pointerdown", e => { if (paused) return; mouse.stroke = [{ x: e.clientX, y: e.clientY }]; out.setPointerCapture(e.pointerId); });
 out.addEventListener("pointermove", e => { if (mouse.stroke) addPoint(mouse.stroke, { x: e.clientX, y: e.clientY }); });
 out.addEventListener("pointerup", () => { if (mouse.stroke) endStroke(mouse); });
 
@@ -877,10 +908,12 @@ function tick(now) {
   ctx.drawImage(layer, 0, 0, W, H);
 
   for (const h of hands.values()) if (now - h.seenAt < 150) {     // one ring per visible hand: filled while drawing
+    ctx.globalAlpha = paused ? .35 : 1;                          // dimmed while paused
     ctx.beginPath(); ctx.arc(h.x, h.y, 9, 0, 6.3); ctx.strokeStyle = ctx.fillStyle = "#F3E9D8"; ctx.lineWidth = 1.2;
     h.pinching ? ctx.fill() : ctx.stroke();
     if (h.fistSince) { ctx.beginPath(); ctx.arc(h.x, h.y, 16, -1.57, -1.57 + 6.28 * clamp01((now - h.fistSince) / FIST_HOLD_MS)); ctx.stroke(); }
   }
+  ctx.globalAlpha = 1;
   fpsAcc += now - last; fpsN++; last = now;
   if (fpsN === 30) { $("perf").textContent = `${Math.round(1000 / (fpsAcc / fpsN))} FPS · ${STYLES[style].label}`; fpsAcc = fpsN = 0; }
   requestAnimationFrame(tick);
